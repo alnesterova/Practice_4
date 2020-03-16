@@ -1,0 +1,200 @@
+---
+title: "Упражнение_4"
+author: "Нестерова А.И."
+date: "16 03 2020"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Математическое моделирование
+
+### Линейные регрессионные модели 
+
+На наборе данных из своего варианта построить модели линейной регрессии с указанными Y и X. Рассмотреть модели с категориальными предикторами, включая их взаимодействие с непрерывными объясняющими переменными. Сгенерировать отчёт по структуре отчёта из практики. Включить в отчёт выводы по каждому из разделов (описание данных, модели, сравнение с kNN). Ответить на вопрос, пригодна ли построенная модель регрессии для прогнозирования и почему.
+Код отчёта в файле .Rmd разместить на github.com, отчёт в формате html – на rpubs.com. Ссылки на репозиторий и отчёт на rpubs выслать на почту.
+
+### Вариант - 13
+
+```{r Данные и пакеты, warning = F, message = F}
+# загрузка пакетов
+library('GGally')       # графики совместного разброса переменных
+library('lmtest')       # тесты остатков регрессионных моделей
+library('FNN')          # алгоритм kNN
+library('ISLR')
+
+# загрузка данных Carseats
+data('Carseats')
+# отбор необходимых данных для построения моделей
+Carseats <- Carseats[,c('Sales', 'Price', 'Population', 'ShelveLoc'),drop=FALSE]
+
+# константы
+my.seed <- 12345
+train.percent <- 0.85
+
+# преобразуем категориальную переменную ShelveLoc в фактор
+Carseats$ShelveLoc <- as.factor(Carseats$ShelveLoc)
+
+# обучающая выборка
+set.seed(my.seed)
+inTrain <- sample(seq_along(Carseats$Price), 
+                  nrow(Carseats) * train.percent)
+df.train <- Carseats[inTrain, c(colnames(Carseats)[-1], colnames(Carseats)[1])]
+df.test <- Carseats[-inTrain,-1]
+```
+
+## Описание переменных  
+
+Набор данных `Carseats` содержит переменные:  
+
+- `Sales` - объем продаж в каждом месте (в тысячах);
+- `Price` – взимаемая плата за автокресла на каждом участке;  
+- `Population` – численность населения в регионе (в тысячах);
+- `ShelveLoc` – коэффициент, указывающий на качество места для размещения автомобильных сидений на каждом участке:
+**1** – плохое (Bad);
+**2** – хорошее (Good);
+**3** - среднее (Medium).
+
+Размерность обучающей выборки: $n = `r dim(df.train)[1]`$ строк, $p = `r dim(df.train)[2] - 1`$ объясняющих переменных. Зависимая переменная -- `Sales`.  
+
+```{r Описание данных, echo = F, message = F, warning = F}
+
+# описательные статистики по переменным
+summary(df.train)
+png('ggpairs(Carseats).png')
+# совместный график разброса переменных
+ggpairs(df.train)
+dev.off()
+png('ggpairs(Carseats_ShelveLoc).png', width = 600)
+# цвета по фактору ShelveLoc
+ggpairs(df.train[, c('Sales', 'Price', 'Population', 'ShelveLoc')], 
+        mapping = ggplot2::aes(color = ShelveLoc))
+dev.off()
+```
+
+Судя по коробчатой диаграмме на пересечении `Sales` и `ShelveLoc`, средний объем продаж отличается зависимости от места размещения автомобильного кресла: чем лучше расположено автомобильное кресло, тем больше объём продаж. Нижний правый график показывает, что доли наблюдений с различными значениями признака `ShelveLoc`в наборе данных имеют следующий вид: наибольшую часть наблюдений отражает коэффициент со значением Medium, а c Bad и Good примерно равны (с коэффициентом Bad чуть больше).
+
+## Модели  
+
+```{r echo = F, warning = F, error = F}
+model.1 <- lm(Sales ~ . + Price:ShelveLoc + Population:ShelveLoc,
+              data = df.train)
+summary(model.1)
+```
+
+Совместное влияние ` Price:ShelveLoc` исключаем, т.к. параметры незначимы (наименее занчимы по сравнению с другими незначимыми коэффициентами).
+
+```{r echo = F, warning = F, error = F}
+model.2 <- lm(Sales ~ . + Population:ShelveLoc,
+              data = df.train)
+summary(model.2)
+```
+
+Взаимодействие `Population:ShelveLoc` также исключаем.
+
+```{r echo = F, warning = F, error = F}
+model.3 <- lm(Sales ~ Price + Population + ShelveLoc,
+              data = df.train)
+summary(model.3)
+```
+
+Параметр `Population` является незначимым, поэтому его тоже исключим из уравнения регресии.
+
+```{r echo = F, warning = F, error = F}
+model.4 <- lm(Sales ~ Price + ShelveLoc,
+              data = df.train)
+summary(model.4)
+```
+
+В данной модели все коэффициенты оказались значимыми, но по характеристикам качества модель недостаточно хороша  ($R^2=0.5583$). Пробуем добавить взаимодействие Price:ShelveLoc.
+
+```{r echo = F, warning = F, error = F}
+model.5 <- lm(Sales ~ Price + ShelveLoc + Price:ShelveLoc,
+              data = df.train)
+summary(model.5)
+```
+
+Очевидно, стоит остановиться на модели без взаимодействий. Проверим её остатки.
+
+# Проверка остатков  
+
+```{r , warning = F, error = F}
+
+# тест Бройша-Пагана
+bptest(model.4)
+
+# статистика Дарбина-Уотсона
+dwtest(model.4)
+
+png('residuals.png', width = 600)
+# графики остатков
+par(mar = c(4.5, 4.5, 2, 1))
+par(mfrow = c(1, 3))
+plot(model.4, 1)
+plot(model.4, 4)
+plot(model.4, 5)
+dev.off()
+par(mfrow = c(1, 1))
+```
+Судя по графику слева, остатки случайны, и их дисперсия постоянна. В модели есть три влиятельных наблюдения: 311, 357, 377, – которые, однако, не выходят за пределы доверительных границ на третьем графике. Графики остатков не заставляют усомниться в том, что остатки удовлетворяют условиям Гаусса-Маркова.
+
+
+# Сравнение с kNN
+
+```{r }
+
+# фактические значения y на тестовой выборке
+y.fact <- Carseats[-inTrain, 1]
+y.model.lm <- predict(model.4, df.test)
+MSE.lm <- sum((y.model.lm - y.fact)^2) / length(y.model.lm)
+
+df.train1 <- df.train
+df.test1 <- df.test
+df.train1$ShelveLoc <- as.numeric(df.train1$ShelveLoc)
+df.test1$ShelveLoc <- as.numeric(df.test1$ShelveLoc)
+
+# kNN требует на вход только числовые переменные
+df.train.num <- as.data.frame(apply(df.train1, 2, as.numeric))
+df.test.num <- as.data.frame(apply(df.test1, 2, as.numeric))
+
+for (i in 2:50){
+    model.knn <- knn.reg(train = df.train.num[, !(colnames(df.train.num) %in% 'Sales')], 
+                     y = df.train.num[, 'Sales'], 
+                     test = df.test.num, k = i)
+    y.model.knn <- model.knn$pred
+    if (i == 2){
+        MSE.knn <- sum((y.model.knn - y.fact)^2) / length(y.model.knn)
+    } else {
+        MSE.knn <- c(MSE.knn, 
+                     sum((y.model.knn - y.fact)^2) / length(y.model.knn))
+    }
+}
+
+png('MSE_lm_kNN.png', width = 600)
+# график
+par(mar = c(3, 3, 1, 1))
+# ошибки kNN
+# ошибка регрессии
+plot(2:50, MSE.knn, ylim = c(4,9), type = 'b', col = 'darkgreen',
+     xlab = 'значение k', ylab = 'MSE на тестовой выборке')
+lines(2:50, rep(MSE.lm, 49), lwd = 2, col = grey(0.2), lty = 2)
+legend('bottomright', lty = c(1, 2), pch = c(1, NA), 
+       col = c('darkgreen', grey(0.2)), 
+       legend = c('k ближайших соседа', 'регрессия (все факторы)'), 
+       lwd = rep(2, 2))
+dev.off()
+```
+
+
+```{r, include = F}
+frml.to.text.01 <- paste0('$\\frac {\\sqrt{MSE_{TEST}}}{\\bar{y}_{TEST}} = ',
+                          round(sqrt(MSE.lm) / mean(y.fact) * 100, 1),
+                          '\\%$')
+```
+
+Как можно видеть по графику, ошибка регрессии на тестовой выборке меньше, чем ошибка метода k ближайших соседей с k от 2 до 50. Ошибка регрессионной модели на тестовой выборке не очень велика и составляет `r frml.to.text.01` от среднего значения зависимой переменной. У лучшей модели kNN точность ещё хуже: она ошибается на `r paste0(round(sqrt(min(MSE.knn)) / mean(y.fact) * 100, 1), '%')` от среднего значения объясняющей переменной.  
+Однако построенная модель регрессии ($model.6$) недостаточно пригодна для прогнозирования, так как её параметры недостатчно хорошо объясняют изменение объёма продаж ($R^2=0.5583$).
